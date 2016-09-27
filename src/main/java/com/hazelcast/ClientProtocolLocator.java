@@ -16,20 +16,17 @@
 package com.hazelcast;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import org.reflections.ReflectionUtils;
 import org.reflections.Reflections;
-import org.reflections.scanners.MethodParameterScanner;
+import org.reflections.scanners.MemberUsageScanner;
 import org.reflections.scanners.SubTypesScanner;
 import org.reflections.scanners.TypeElementsScanner;
 import org.reflections.util.ConfigurationBuilder;
 
 import java.lang.reflect.Field;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -42,16 +39,17 @@ public class ClientProtocolLocator {
 
     public static void main(String[] args)
             throws ClassNotFoundException {
-        Reflections reflections = new Reflections(
-                new ConfigurationBuilder().forPackages("com.hazelcast").
-                        addScanners(new SubTypesScanner(false)).build()
-        );
+        Reflections reflections = new Reflections(new ConfigurationBuilder().forPackages("com.hazelcast").
+                addScanners(new SubTypesScanner(false)).build());
 
-        Set<Class> requestResponseParamsClasses = reflections.getTypesAnnotatedWith(SuppressFBWarnings.class).stream().filter(klass -> {
-            return klass.getName().endsWith("Codec");
-        }).flatMap(klass -> {
-            return Arrays.asList(klass.getDeclaredClasses()).stream();
-        }).collect(Collectors.toSet());
+        Set<Class> requestResponseParamsClasses = reflections.getTypesAnnotatedWith(SuppressFBWarnings.class).stream()
+                                                             .filter(klass -> {
+                                                                 return klass.getName().endsWith("Codec");
+                                                             }).flatMap(klass -> {
+                    return Arrays.stream(klass.getDeclaredClasses());
+                }).filter(klass -> {
+                    return klass.getName().endsWith("Parameters");
+                }).collect(Collectors.toSet());
 
         Map<Class, Set<Field>> paramsByType = new HashMap<>();
         for (Class klass : requestResponseParamsClasses) {
@@ -63,7 +61,22 @@ public class ClientProtocolLocator {
                 if (paramsByType.containsKey(f.getType())) {
                     paramsByType.get(f.getType()).add(f);
                 } else {
-                    Set<Field> fields = new HashSet<>();
+                    Set<Field> fields = new TreeSet<>(new Comparator<Field>() {
+                        @Override
+                        public int compare(Field o1, Field o2) {
+                            if (o1 == null) {
+                                return -1;
+                            } else if (o2 == null) {
+                                return 1;
+                            } else {
+                                if (o1.getDeclaringClass() == o2.getDeclaringClass()) {
+                                    return o1.getName().compareTo(o2.getName());
+                                } else {
+                                    return o1.getDeclaringClass().getName().compareTo(o2.getDeclaringClass().getName());
+                                }
+                            }
+                        }
+                    });
                     fields.add(f);
                     paramsByType.put(f.getType(), fields);
                 }
