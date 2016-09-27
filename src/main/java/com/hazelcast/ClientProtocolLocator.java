@@ -15,18 +15,19 @@
  */
 package com.hazelcast;
 
+import com.hazelcast.nio.serialization.Data;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.reflections.Reflections;
 import org.reflections.scanners.MemberUsageScanner;
 import org.reflections.scanners.SubTypesScanner;
-import org.reflections.scanners.TypeElementsScanner;
+import org.reflections.scanners.TypeAnnotationsScanner;
+import org.reflections.util.ClasspathHelper;
 import org.reflections.util.ConfigurationBuilder;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -39,28 +40,29 @@ public class ClientProtocolLocator {
 
     public static void main(String[] args)
             throws ClassNotFoundException {
-        Reflections reflections = new Reflections(new ConfigurationBuilder().forPackages("com.hazelcast").
-                addScanners(new SubTypesScanner(false)).build());
+        Reflections reflections = new Reflections(new ConfigurationBuilder()
+                .build(new SubTypesScanner(false), new TypeAnnotationsScanner(), ClasspathHelper.forPackage("com.hazelcast")));
 
         Set<Class> requestResponseParamsClasses = reflections.getTypesAnnotatedWith(SuppressFBWarnings.class).stream()
-                                                             .filter(klass -> {
-                                                                 return klass.getName().endsWith("Codec");
-                                                             }).flatMap(klass -> {
-                    return Arrays.stream(klass.getDeclaredClasses());
-                }).filter(klass -> {
-                    return klass.getName().endsWith("Parameters");
-                }).collect(Collectors.toSet());
+        .filter(klass -> {
+            return klass.getName().endsWith("Codec");
+        }).flatMap(klass -> {
+            return Arrays.stream(klass.getDeclaredClasses());
+        }).filter(klass -> {
+            return klass.getName().endsWith("Parameters");
+        }).collect(Collectors.toSet());
 
+        // Map: Enclosing Class -> its fields
         Map<Class, Set<Field>> paramsByType = new HashMap<>();
+        // Map: Field name -> "enclosing class: field name", just for Data-typed parameters
+        Map<String, Set<String>> dataParamsByParamName = new HashMap<>();
         for (Class klass : requestResponseParamsClasses) {
             for (Field f : klass.getDeclaredFields()) {
                 // ignore static field named TYPE
                 if (f.getName().equals("TYPE")) {
                     continue;
                 }
-                if (paramsByType.containsKey(f.getType())) {
-                    paramsByType.get(f.getType()).add(f);
-                } else {
+                if (!paramsByType.containsKey(f.getType())) {
                     Set<Field> fields = new TreeSet<>(new Comparator<Field>() {
                         @Override
                         public int compare(Field o1, Field o2) {
@@ -77,8 +79,14 @@ public class ClientProtocolLocator {
                             }
                         }
                     });
-                    fields.add(f);
                     paramsByType.put(f.getType(), fields);
+                }
+                paramsByType.get(f.getType()).add(f);
+                if (f.getType().isAssignableFrom(Data.class)) {
+                    if (!dataParamsByParamName.containsKey(f.getName())) {
+                        dataParamsByParamName.put(f.getName(), new TreeSet<>());
+                    }
+                    dataParamsByParamName.get(f.getName()).add(toString(f));
                 }
             }
         }
@@ -93,8 +101,19 @@ public class ClientProtocolLocator {
             System.out.println("\nFields of type " + entry.getKey());
             System.out.println("---");
             for (Field f : entry.getValue()) {
-                System.out.println("" + f.getDeclaringClass().getName() + ": " + f.getName());
+                System.out.println(toString(f));
             }
         }
+
+        for (Map.Entry<String, Set<String>> entry : dataParamsByParamName.entrySet()) {
+            System.out.println("\nParameters with name " + entry.getKey());
+            for (String s : entry.getValue()) {
+                System.out.println("\t" + s);
+            }
+        }
+    }
+
+    private static String toString(Field f) {
+        return f.getDeclaringClass().getName() + ": " + f.getName();
     }
 }
