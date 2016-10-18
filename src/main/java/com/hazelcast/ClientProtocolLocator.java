@@ -114,6 +114,10 @@ public class ClientProtocolLocator {
     }
 
     private static String toString(Field f) {
-        return f.getDeclaringClass().getName() + ": " + f.getName();
+        if (f.getGenericType() != null) {
+            return f.getGenericType().getTypeName() + ": " + f.getName();
+        } else {
+            return f.getDeclaringClass().getName() + ": " + f.getName();
+        }
     }
 }
